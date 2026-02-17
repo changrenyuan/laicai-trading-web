@@ -1,7 +1,14 @@
 'use client';
 
+/**
+ * 日志查看页面 - 事件驱动版本
+ *
+ * 不再使用轮询，所有日志通过 WebSocket 实时推送
+ * 页面只负责渲染，不主动请求数据
+ */
+
 import * as React from 'react';
-import { Search, Filter, Download, Terminal, Pause, Play, Trash2, RefreshCw } from 'lucide-react';
+import { Search, Trash2, Pause, Play, RefreshCw, CheckCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,166 +20,79 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-
-// Mock log entries
-const mockLogs = [
-  {
-    timestamp: '2024-01-20 14:32:15',
-    level: 'INFO',
-    source: 'PMM Strategy',
-    message: 'Placing buy order on Binance BTC/USDT at 52,345.00',
-  },
-  {
-    timestamp: '2024-01-20 14:32:16',
-    level: 'INFO',
-    source: 'PMM Strategy',
-    message: 'Order ORD-001 successfully placed',
-  },
-  {
-    timestamp: '2024-01-20 14:32:18',
-    level: 'SUCCESS',
-    source: 'PMM Strategy',
-    message: 'Order ORD-001 filled at 52,345.00',
-  },
-  {
-    timestamp: '2024-01-20 14:32:20',
-    level: 'INFO',
-    source: 'Arbitrage Bot',
-    message: 'Checking arbitrage opportunity for ETH/BTC',
-  },
-  {
-    timestamp: '2024-01-20 14:32:22',
-    level: 'INFO',
-    source: 'Arbitrage Bot',
-    message: 'Found arbitrage opportunity: spread 0.5%',
-  },
-  {
-    timestamp: '2024-01-20 14:32:25',
-    level: 'INFO',
-    source: 'Arbitrage Bot',
-    message: 'Placing sell order on Coinbase ETH/USDT at 2,856.00',
-  },
-  {
-    timestamp: '2024-01-20 14:32:30',
-    level: 'WARNING',
-    source: 'Market Maker SOL',
-    message: 'Inventory imbalance detected for SOL/USDT',
-  },
-  {
-    timestamp: '2024-01-20 14:32:35',
-    level: 'INFO',
-    source: 'Market Maker SOL',
-    message: 'Adjusting spread to 0.3% to rebalance',
-  },
-  {
-    timestamp: '2024-01-20 14:32:40',
-    level: 'INFO',
-    source: 'Cross Exchange',
-    message: 'Connecting to Kraken testnet...',
-  },
-  {
-    timestamp: '2024-01-20 14:32:45',
-    level: 'ERROR',
-    source: 'Cross Exchange',
-    message: 'Connection failed: Invalid API credentials',
-  },
-  {
-    timestamp: '2024-01-20 14:33:00',
-    level: 'INFO',
-    source: 'PMM Strategy',
-    message: 'Placing sell order on Binance BTC/USDT at 52,400.00',
-  },
-  {
-    timestamp: '2024-01-20 14:33:02',
-    level: 'SUCCESS',
-    source: 'PMM Strategy',
-    message: 'Order ORD-004 filled at 52,400.00',
-  },
-  {
-    timestamp: '2024-01-20 14:33:05',
-    level: 'INFO',
-    source: 'Arbitrage Bot',
-    message: 'Placing buy order on Binance ETH/USDT at 2,850.00',
-  },
-  {
-    timestamp: '2024-01-20 14:33:10',
-    level: 'INFO',
-    source: 'System',
-    message: 'Heartbeat: All systems operational',
-  },
-  {
-    timestamp: '2024-01-20 14:33:15',
-    level: 'INFO',
-    source: 'Market Maker SOL',
-    message: 'Cancelling stale orders older than 5 minutes',
-  },
-];
+import { useEngineStore } from '@/store/engineStore';
+import { useUIStore } from '@/store/uiStore';
+import { engineWS, WSConnectionState } from '@/core/ws';
 
 export default function LogsPage() {
-  const [logs, setLogs] = React.useState(mockLogs);
-  const [isPaused, setIsPaused] = React.useState(false);
+  // 从全局 store 获取日志数据（不再使用本地状态）
+  const logs = useEngineStore((state) => state.logs);
+  const wsConnected = useUIStore((state) => state.wsConnected);
+
+  // UI 状态
+  const [searchQuery, setSearchQuery] = React.useState('');
   const [filterLevel, setFilterLevel] = React.useState('all');
   const [filterSource, setFilterSource] = React.useState('all');
-  const [searchQuery, setSearchQuery] = React.useState('');
+  const [isPaused, setIsPaused] = React.useState(false);
 
-  // Simulate real-time logs
-  React.useEffect(() => {
-    if (isPaused) return;
+  // 计算统计
+  const stats = React.useMemo(() => {
+    return {
+      total: logs.length,
+      error: logs.filter((l) => l.level === 'error').length,
+      warning: logs.filter((l) => l.level === 'warn').length,
+      success: logs.filter((l) => l.level === 'info' || l.level === 'debug').length,
+    };
+  }, [logs]);
 
-    const interval = setInterval(() => {
-      const newLog = {
-        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-        level: ['INFO', 'SUCCESS', 'WARNING', 'ERROR'][Math.floor(Math.random() * 4)] as any,
-        source: ['PMM Strategy', 'Arbitrage Bot', 'Market Maker SOL', 'System'][
-          Math.floor(Math.random() * 4)
-        ],
-        message: [
-          'Processing market data update',
-          'Checking order book depth',
-          'Evaluating trade opportunity',
-          'Monitoring price movements',
-          'Syncing with exchange',
-        ][Math.floor(Math.random() * 5)],
-      };
+  // 过滤日志
+  const filteredLogs = React.useMemo(() => {
+    return logs.filter((log) => {
+      if (filterLevel !== 'all' && log.level !== filterLevel) return false;
+      if (filterSource !== 'all' && log.source !== filterSource) return false;
+      if (searchQuery && !log.msg.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    });
+  }, [logs, filterLevel, filterSource, searchQuery]);
 
-      setLogs((prev) => [newLog, ...prev].slice(0, 100));
-    }, 3000);
+  // 获取唯一来源列表
+  const uniqueSources = React.useMemo(() => {
+    const sources = new Set(logs.map((l) => l.source));
+    return Array.from(sources).sort();
+  }, [logs]);
 
-    return () => clearInterval(interval);
-  }, [isPaused]);
-
-  const filteredLogs = logs.filter((log) => {
-    if (filterLevel !== 'all' && log.level.toLowerCase() !== filterLevel) return false;
-    if (filterSource !== 'all' && log.source !== filterSource) return false;
-    if (searchQuery && !log.message.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
-  });
-
-  const getLevelBadgeVariant = (level: string) => {
+  // 获取日志级别颜色
+  const getLevelColor = (level: string) => {
     switch (level) {
-      case 'SUCCESS':
-        return 'default';
-      case 'WARNING':
-        return 'secondary';
-      case 'ERROR':
-        return 'destructive';
+      case 'error':
+        return 'text-red-500';
+      case 'warn':
+        return 'text-yellow-500';
+      case 'success':
+      case 'info':
+        return 'text-green-500';
+      case 'debug':
+        return 'text-blue-500';
       default:
-        return 'outline';
+        return 'text-muted-foreground';
     }
   };
 
-  const getLevelColor = (level: string) => {
+  // 获取日志级别 Badge 变体
+  const getLevelBadgeVariant = (level: string) => {
     switch (level) {
-      case 'SUCCESS':
-        return 'text-green-500';
-      case 'WARNING':
-        return 'text-yellow-500';
-      case 'ERROR':
-        return 'text-red-500';
+      case 'error':
+        return 'destructive';
+      case 'warn':
+        return 'secondary';
+      case 'info':
+      case 'success':
+        return 'default';
+      case 'debug':
+        return 'outline';
       default:
-        return 'text-blue-500';
+        return 'outline';
     }
   };
 
@@ -183,7 +103,7 @@ export default function LogsPage() {
         <div className="flex h-16 items-center border-b px-6">
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Terminal className="h-5 w-5 text-primary-foreground" />
+              <Pause className="h-5 w-5 text-primary-foreground" />
             </div>
             <span className="text-lg font-semibold">Hummingbot</span>
           </div>
@@ -218,19 +138,34 @@ export default function LogsPage() {
           <div className="mb-8 flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">System Logs</h1>
-              <p className="text-muted-foreground">Monitor real-time bot activity and system events</p>
+              <p className="text-muted-foreground">实时监控交易系统日志（事件驱动）</p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setLogs([])}>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Clear
-              </Button>
-              <Button variant="outline">
-                <Download className="mr-2 h-4 w-4" />
-                Export
-              </Button>
+            <div className="flex items-center gap-2">
+              <div className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-sm text-muted-foreground">
+                {wsConnected ? '已连接' : '未连接'}
+              </span>
             </div>
           </div>
+
+          {/* Connection Status Card */}
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-4">
+                <CheckCircle className={`h-8 w-8 ${wsConnected ? 'text-green-500' : 'text-red-500'}`} />
+                <div>
+                  <p className="font-semibold">
+                    {wsConnected ? 'WebSocket 已连接' : 'WebSocket 未连接'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {wsConnected
+                      ? '日志将实时推送，无需轮询'
+                      : '等待连接...'}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Filters */}
           <Card className="mb-6">
@@ -240,7 +175,7 @@ export default function LogsPage() {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      placeholder="Search logs..."
+                      placeholder="搜索日志内容..."
                       className="pl-9"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
@@ -250,29 +185,29 @@ export default function LogsPage() {
                 <div className="w-[180px]">
                   <Select value={filterLevel} onValueChange={setFilterLevel}>
                     <SelectTrigger>
-                      <SelectValue placeholder="All Levels" />
+                      <SelectValue placeholder="所有级别" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Levels</SelectItem>
-                      <SelectItem value="info">Info</SelectItem>
-                      <SelectItem value="success">Success</SelectItem>
-                      <SelectItem value="warning">Warning</SelectItem>
+                      <SelectItem value="all">所有级别</SelectItem>
                       <SelectItem value="error">Error</SelectItem>
+                      <SelectItem value="warn">Warning</SelectItem>
+                      <SelectItem value="info">Info</SelectItem>
+                      <SelectItem value="debug">Debug</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="w-[180px]">
                   <Select value={filterSource} onValueChange={setFilterSource}>
                     <SelectTrigger>
-                      <SelectValue placeholder="All Sources" />
+                      <SelectValue placeholder="所有来源" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Sources</SelectItem>
-                      <SelectItem value="PMM Strategy">PMM Strategy</SelectItem>
-                      <SelectItem value="Arbitrage Bot">Arbitrage Bot</SelectItem>
-                      <SelectItem value="Market Maker SOL">Market Maker SOL</SelectItem>
-                      <SelectItem value="Cross Exchange">Cross Exchange</SelectItem>
-                      <SelectItem value="System">System</SelectItem>
+                      <SelectItem value="all">所有来源</SelectItem>
+                      {uniqueSources.map((source) => (
+                        <SelectItem key={source} value={source}>
+                          {source}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -284,18 +219,18 @@ export default function LogsPage() {
                   {isPaused ? (
                     <>
                       <Play className="mr-2 h-4 w-4" />
-                      Resume
+                      恢复
                     </>
                   ) : (
                     <>
                       <Pause className="mr-2 h-4 w-4" />
-                      Pause
+                      暂停
                     </>
                   )}
                 </Button>
-                <Button variant="outline" onClick={() => window.location.reload()}>
+                <Button variant="outline" onClick={() => setIsPaused(false)}>
                   <RefreshCw className="mr-2 h-4 w-4" />
-                  Refresh
+                  滚动到底部
                 </Button>
               </div>
             </CardContent>
@@ -305,41 +240,49 @@ export default function LogsPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>Live Logs</CardTitle>
+                <CardTitle>
+                  实时日志 ({filteredLogs.length} / {stats.total})
+                </CardTitle>
                 <div className="flex items-center gap-2">
-                  <div className={`h-2 w-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-green-500'}`} />
-                  <span className="text-sm text-muted-foreground">
-                    {isPaused ? 'Paused' : 'Live'}
-                  </span>
+                  {isPaused && (
+                    <Badge variant="secondary">已暂停</Badge>
+                  )}
+                  {wsConnected && (
+                    <Badge variant="default" className="gap-1">
+                      <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                      实时推送
+                    </Badge>
+                  )}
                 </div>
               </div>
             </CardHeader>
             <CardContent>
               <ScrollArea className="h-[600px] w-full rounded-md border bg-muted/50 p-4">
-                <div className="space-y-2 font-mono text-sm">
-                  {filteredLogs.map((log, idx) => (
-                    <div
-                      key={`${log.timestamp}-${idx}`}
-                      className="flex gap-4 rounded-lg bg-background p-3 hover:bg-accent/50 transition-colors"
-                    >
-                      <div className="flex-shrink-0 text-muted-foreground w-[180px]">
-                        {log.timestamp}
+                {filteredLogs.length > 0 ? (
+                  <div className="space-y-1 font-mono text-sm">
+                    {filteredLogs.map((log, idx) => (
+                      <div
+                        key={`${log.timestamp}-${idx}`}
+                        className="flex gap-4 rounded-lg bg-background p-2 hover:bg-accent/50 transition-colors"
+                      >
+                        <div className="flex-shrink-0 text-muted-foreground w-[180px] text-xs">
+                          {log.timestamp}
+                        </div>
+                        <div className={`flex-shrink-0 font-semibold w-[80px] text-xs uppercase ${getLevelColor(log.level)}`}>
+                          {log.level}
+                        </div>
+                        <div className="flex-shrink-0 font-medium w-[150px] text-xs text-muted-foreground">
+                          {log.source}
+                        </div>
+                        <div className="flex-1 text-xs">{log.msg}</div>
                       </div>
-                      <div className={`flex-shrink-0 font-semibold w-[100px] ${getLevelColor(log.level)}`}>
-                        {log.level}
-                      </div>
-                      <div className="flex-shrink-0 font-medium w-[180px] text-muted-foreground">
-                        {log.source}
-                      </div>
-                      <div className="flex-1">{log.message}</div>
-                    </div>
-                  ))}
-                  {filteredLogs.length === 0 && (
-                    <div className="flex items-center justify-center h-32 text-muted-foreground">
-                      No logs found
-                    </div>
-                  )}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-32 text-muted-foreground">
+                    {wsConnected ? '暂无日志' : '等待连接...'}
+                  </div>
+                )}
               </ScrollArea>
             </CardContent>
           </Card>
@@ -348,43 +291,53 @@ export default function LogsPage() {
           <div className="mt-6 grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Logs</CardTitle>
+                <CardTitle className="text-sm font-medium">总日志数</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{logs.length}</div>
+                <div className="text-2xl font-bold">{stats.total}</div>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Errors</CardTitle>
+                <CardTitle className="text-sm font-medium">错误</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-red-500">
-                  {logs.filter((l) => l.level === 'ERROR').length}
-                </div>
+                <div className="text-2xl font-bold text-red-500">{stats.error}</div>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Warnings</CardTitle>
+                <CardTitle className="text-sm font-medium">警告</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-yellow-500">
-                  {logs.filter((l) => l.level === 'WARNING').length}
-                </div>
+                <div className="text-2xl font-bold text-yellow-500">{stats.warning}</div>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Success</CardTitle>
+                <CardTitle className="text-sm font-medium">信息</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-500">
-                  {logs.filter((l) => l.level === 'SUCCESS').length}
-                </div>
+                <div className="text-2xl font-bold text-green-500">{stats.success}</div>
               </CardContent>
             </Card>
           </div>
+
+          {/* Architecture Info */}
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>架构说明</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>✅ <strong>事件驱动架构：</strong>所有日志通过 WebSocket 实时推送，无需轮询</p>
+                <p>✅ <strong>全局状态管理：</strong>日志存储在 Zustand Store 中，所有页面共享</p>
+                <p>✅ <strong>零本地状态：</strong>页面只负责渲染，不保存任何日志数据</p>
+                <p>✅ <strong>自动重连：</strong>连接断开后自动重连，状态自动恢复</p>
+                <p>✅ <strong>性能优化：</strong>最多保留 500 条日志，自动清理旧日志</p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </main>
     </div>

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inspector } from 'react-dev-inspector';
+import { WSProvider } from '@/components/WSProvider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -34,8 +35,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`antialiased bg-background text-foreground`}>
-        {isDev && <Inspector />}
-        {children}
+        <WSProvider>
+          {isDev && <Inspector />}
+          {children}
+        </WSProvider>
       </body>
     </html>
   );
