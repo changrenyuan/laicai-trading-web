@@ -1,13 +1,36 @@
 'use client';
 
 import * as React from 'react';
-import { Activity, ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, Clock, Zap } from 'lucide-react';
+import { Activity, ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, Clock, Zap, Pause, Play } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useEngineStore, useUIStore } from '@/store';
+import { sendCommand } from '@/core/command';
 
 export default function DashboardPage() {
+  const engine = useEngineStore();
+  const ui = useUIStore();
+
+  // 转换交易数据格式
+  const recentTrades = engine.trades.map(trade => ({
+    id: trade.trade_id,
+    type: trade.side,
+    pair: trade.symbol,
+    price: trade.price.toFixed(2),
+    amount: trade.amount.toFixed(2),
+    timestamp: new Date(trade.timestamp * 1000).toISOString(),
+  }));
+
+  // 启动/停止引擎
+  const toggleEngine = () => {
+    if (engine.isConnected) {
+      sendCommand('stop');
+    } else {
+      sendCommand('start');
+    }
+  };
+
   return (
     <div className="flex h-screen">
       {/* Sidebar */}
@@ -43,8 +66,14 @@ export default function DashboardPage() {
         </nav>
         <div className="absolute bottom-4 left-4 right-4">
           <div className="flex items-center gap-2 rounded-lg border bg-card p-3">
-            <div className="h-2 w-2 rounded-full bg-green-500" />
-            <span className="text-xs text-muted-foreground">Bot Running</span>
+            <div
+              className={`h-2 w-2 rounded-full ${
+                engine.isConnected ? 'bg-green-500' : 'bg-red-500'
+              }`}
+            />
+            <span className="text-xs text-muted-foreground">
+              {engine.isConnected ? 'Bot Running' : 'Bot Stopped'}
+            </span>
           </div>
         </div>
       </aside>
@@ -60,12 +89,29 @@ export default function DashboardPage() {
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="gap-1">
-                <div className="h-2 w-2 rounded-full bg-green-500" />
-                Connected
+                <div
+                  className={`h-2 w-2 rounded-full ${
+                    ui.wsStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'
+                  }`}
+                />
+                {ui.wsStatus === 'connected' ? 'Connected' : 'Disconnected'}
               </Badge>
+              <Button variant="outline" size="sm" onClick={toggleEngine}>
+                {engine.isConnected ? (
+                  <>
+                    <Pause className="mr-2 h-4 w-4" />
+                    Stop
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" />
+                    Start
+                  </>
+                )}
+              </Button>
               <Button variant="outline" size="sm">
                 <Clock className="mr-2 h-4 w-4" />
-                Uptime: 24h 15m
+                Uptime: {formatUptime(engine.uptime)}
               </Button>
             </div>
           </div>
@@ -78,10 +124,14 @@ export default function DashboardPage() {
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">$12,453.00</div>
+                <div className="text-2xl font-bold">
+                  ${engine.stats.totalProfit.toFixed(2)}
+                </div>
                 <p className="flex items-center text-xs text-muted-foreground">
                   <ArrowUpRight className="mr-1 h-3 w-3 text-green-500" />
-                  <span className="text-green-500">+15.3%</span>
+                  <span className="text-green-500">
+                    +{engine.stats.profitChange.toFixed(1)}%
+                  </span>
                   <span className="ml-1">from last month</span>
                 </p>
               </CardContent>
@@ -93,10 +143,12 @@ export default function DashboardPage() {
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">1,284</div>
+                <div className="text-2xl font-bold">{engine.stats.totalTrades}</div>
                 <p className="flex items-center text-xs text-muted-foreground">
                   <ArrowUpRight className="mr-1 h-3 w-3 text-green-500" />
-                  <span className="text-green-500">+124</span>
+                  <span className="text-green-500">
+                    +{engine.stats.tradesToday}
+                  </span>
                   <span className="ml-1">today</span>
                 </p>
               </CardContent>
@@ -108,10 +160,14 @@ export default function DashboardPage() {
                 <Zap className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">94.2%</div>
+                <div className="text-2xl font-bold">
+                  {engine.stats.successRate.toFixed(1)}%
+                </div>
                 <p className="flex items-center text-xs text-muted-foreground">
                   <ArrowDownRight className="mr-1 h-3 w-3 text-red-500" />
-                  <span className="text-red-500">-0.5%</span>
+                  <span className="text-red-500">
+                    {engine.stats.successRateChange.toFixed(1)}%
+                  </span>
                   <span className="ml-1">from yesterday</span>
                 </p>
               </CardContent>
@@ -123,10 +179,17 @@ export default function DashboardPage() {
                 <Activity className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">3</div>
+                <div className="text-2xl font-bold">
+                  {engine.strategies.filter((s) => s.status === 'running').length}
+                </div>
                 <p className="flex items-center text-xs text-muted-foreground">
-                  <span className="text-green-500">All running</span>
-                  <span className="ml-1">smoothly</span>
+                  <span className="text-green-500">
+                    {engine.strategies.filter((s) => s.status === 'running').length} running
+                  </span>
+                  <span className="ml-1">
+                    {' '}
+                    of {engine.strategies.length} total
+                  </span>
                 </p>
               </CardContent>
             </Card>
@@ -140,26 +203,37 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {[
-                    { name: 'PMM Strategy', pair: 'BTC/USDT', profit: '+$523.00', status: 'running' },
-                    { name: 'Arbitrage', pair: 'ETH/BTC', profit: '+$892.00', status: 'running' },
-                    { name: 'Market Making', pair: 'SOL/USDT', profit: '+$238.00', status: 'running' },
-                  ].map((strategy, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-lg border p-4">
+                  {engine.strategies.map((strategy) => (
+                    <div key={strategy.id} className="flex items-center justify-between rounded-lg border p-4">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <p className="font-medium">{strategy.name}</p>
                           <Badge variant="outline" className="text-xs">
                             {strategy.pair}
                           </Badge>
+                          <Badge
+                            variant={strategy.status === 'running' ? 'default' : 'secondary'}
+                            className="text-xs"
+                          >
+                            {strategy.status}
+                          </Badge>
                         </div>
-                        <p className="text-sm text-muted-foreground">{strategy.status}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {strategy.status === 'running' ? 'Running smoothly' : 'Not active'}
+                        </p>
                       </div>
                       <div className="text-right">
-                        <p className="font-medium text-green-500">{strategy.profit}</p>
+                        <p className={`font-medium ${strategy.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {strategy.profit >= 0 ? '+' : ''}${strategy.profit.toFixed(2)}
+                        </p>
                       </div>
                     </div>
                   ))}
+                  {engine.strategies.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      No active strategies
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -170,17 +244,14 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {[
-                    { type: 'buy', pair: 'BTC/USDT', price: '52,345.00', amount: '0.15', time: '2m ago' },
-                    { type: 'sell', pair: 'ETH/USDT', price: '2,856.00', amount: '3.2', time: '5m ago' },
-                    { type: 'buy', pair: 'SOL/USDT', price: '98.50', amount: '50', time: '8m ago' },
-                    { type: 'sell', pair: 'BTC/USDT', price: '52,400.00', amount: '0.2', time: '12m ago' },
-                  ].map((trade, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-lg border p-4">
+                  {recentTrades.slice(0, 5).map((trade) => (
+                    <div key={trade.id} className="flex items-center justify-between rounded-lg border p-4">
                       <div className="flex items-center gap-3">
                         <div
                           className={`flex h-8 w-8 items-center justify-center rounded-full ${
-                            trade.type === 'buy' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
+                            trade.type === 'buy'
+                              ? 'bg-green-500/10 text-green-500'
+                              : 'bg-red-500/10 text-red-500'
                           }`}
                         >
                           {trade.type === 'buy' ? (
@@ -191,15 +262,20 @@ export default function DashboardPage() {
                         </div>
                         <div>
                           <p className="font-medium">{trade.pair}</p>
-                          <p className="text-sm text-muted-foreground">{trade.time}</p>
+                          <p className="text-sm text-muted-foreground">{formatTimeAgo(trade.timestamp)}</p>
                         </div>
                       </div>
                       <div className="text-right">
                         <p className="font-medium">${trade.price}</p>
-                        <p className="text-sm text-muted-foreground">{trade.amount} {trade.pair.split('/')[0]}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {trade.amount} {trade.pair.split('/')[0]}
+                        </p>
                       </div>
                     </div>
                   ))}
+                  {recentTrades.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">No recent trades</div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -223,4 +299,24 @@ export default function DashboardPage() {
       </main>
     </div>
   );
+}
+
+// 格式化运行时间
+function formatUptime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return `${hours}h ${minutes}m ${secs}s`;
+}
+
+// 格式化时间差
+function formatTimeAgo(timestamp: string): string {
+  const now = Date.now();
+  const time = new Date(timestamp).getTime();
+  const diff = Math.floor((now - time) / 1000);
+
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
 }

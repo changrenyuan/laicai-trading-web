@@ -73,15 +73,37 @@ interface Balance {
 }
 
 // ============================================================================
+// 统计数据接口
+// ============================================================================
+
+interface Stats {
+  totalProfit: number;
+  profitChange: number;
+  totalTrades: number;
+  tradesToday: number;
+  successRate: number;
+  successRateChange: number;
+}
+
+// ============================================================================
 // 引擎状态接口
 // ============================================================================
 
 interface EngineState {
+  // 引擎连接状态
+  isConnected: boolean;
+
+  // 运行时间（秒）
+  uptime: number;
+
+  // 统计数据
+  stats: Stats;
+
   // 价格数据
   prices: Record<string, number>;
 
   // 策略数据
-  strategies: Record<string, Strategy>;
+  strategies: Strategy[];
 
   // 订单数据
   orders: Record<string, Order>;
@@ -151,9 +173,6 @@ interface EngineState {
   // 辅助选择器
   // ============================================================================
 
-  // 获取所有策略列表
-  getStrategiesList: () => Strategy[];
-
   // 获取所有订单列表
   getOrdersList: () => Order[];
 
@@ -164,10 +183,25 @@ interface EngineState {
   getBalancesList: () => Balance[];
 
   // 获取最近的日志
-  getRecentLogs: (limit?: number) => typeof EngineState.logs;
+  getRecentLogs: (limit?: number) => Array<{
+    level: "info" | "warn" | "error" | "debug";
+    msg: string;
+    source: string;
+    timestamp: string;
+  }>;
 
   // 获取最近的交易
-  getRecentTrades: (limit?: number) => typeof EngineState.trades;
+  getRecentTrades: (limit?: number) => Array<{
+    trade_id: string;
+    order_id: string;
+    symbol: string;
+    price: number;
+    amount: number;
+    side: "buy" | "sell";
+    fee: number;
+    strategy?: string;
+    timestamp: number;
+  }>;
 
   // 获取指定策略
   getStrategy: (id: string) => Strategy | undefined;
@@ -191,8 +225,18 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   // 初始状态
   // ============================================================================
 
+  isConnected: false,
+  uptime: 0,
+  stats: {
+    totalProfit: 0,
+    profitChange: 15.3,
+    totalTrades: 0,
+    tradesToday: 0,
+    successRate: 94.2,
+    successRateChange: -0.5,
+  },
   prices: {},
-  strategies: {},
+  strategies: [],
   orders: {},
   positions: {},
   balances: {},
@@ -209,6 +253,30 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     const state = get();
 
     switch (event.type) {
+      // 引擎连接状态
+      case "connected":
+        set({ isConnected: true });
+        break;
+
+      case "disconnected":
+        set({ isConnected: false });
+        break;
+
+      // 系统状态
+      case "system_status":
+        set({
+          systemStatus: event,
+          uptime: event.uptime,
+          isConnected: event.bot_status === "running",
+          stats: {
+            ...state.stats,
+            totalProfit: event.total_profit,
+            totalTrades: event.total_trades,
+            successRate: event.success_rate,
+          },
+        });
+        break;
+
       // 价格更新
       case "price":
         set({
@@ -275,11 +343,12 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 
       // 策略更新
       case "strategy":
+        const existingStrategies = state.strategies;
+        const updatedStrategies = existingStrategies.filter(s => s.id !== event.id);
         set({
-          strategies: {
-            ...state.strategies,
-            [event.id]: {
-              ...state.strategies[event.id],
+          strategies: [
+            ...updatedStrategies,
+            {
               id: event.id,
               name: event.name,
               type: "strategy",
@@ -288,11 +357,10 @@ export const useEngineStore = create<EngineState>((set, get) => ({
               status: event.status,
               profit: event.profit || 0,
               trades: event.trades || 0,
-              created: state.strategies[event.id]?.created || new Date().toISOString().split("T")[0],
+              created: existingStrategies.find(s => s.id === event.id)?.created || new Date().toISOString().split("T")[0],
               error_msg: event.error_msg,
-              timestamp: event.timestamp,
             },
-          },
+          ],
         });
         break;
 
@@ -318,13 +386,6 @@ export const useEngineStore = create<EngineState>((set, get) => ({
         });
         break;
 
-      // 系统状态
-      case "system_status":
-        set({
-          systemStatus: event,
-        });
-        break;
-
       // 交易成交
       case "trade":
         set({
@@ -340,8 +401,18 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 
   reset: () => {
     set({
+      isConnected: false,
+      uptime: 0,
+      stats: {
+        totalProfit: 0,
+        profitChange: 15.3,
+        totalTrades: 0,
+        tradesToday: 0,
+        successRate: 94.2,
+        successRateChange: -0.5,
+      },
       prices: {},
-      strategies: {},
+      strategies: [],
       orders: {},
       positions: {},
       balances: {},
@@ -355,10 +426,6 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   // ============================================================================
   // 辅助选择器
   // ============================================================================
-
-  getStrategiesList: () => {
-    return Object.values(get().strategies);
-  },
 
   getOrdersList: () => {
     return Object.values(get().orders).sort((a, b) => {
@@ -383,7 +450,7 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   },
 
   getStrategy: (id: string) => {
-    return get().strategies[id];
+    return get().strategies.find(s => s.id === id);
   },
 
   getOrder: (id: string) => {

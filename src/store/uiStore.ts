@@ -20,8 +20,10 @@ interface UIState {
   setCurrentPath: (path: string) => void;
 
   // WebSocket 连接状态
+  wsStatus: "connected" | "disconnected" | "connecting" | "reconnecting";
   wsConnected: boolean;
   wsConnecting: boolean;
+  setWsStatus: (status: "connected" | "disconnected" | "connecting" | "reconnecting") => void;
   setWsConnected: (connected: boolean) => void;
   setWsConnecting: (connecting: boolean) => void;
 
@@ -99,6 +101,7 @@ export const useUIStore = create<UIState>()(
 
       sidebarCollapsed: false,
       currentPath: "/",
+      wsStatus: "disconnected",
       wsConnected: false,
       wsConnecting: false,
       theme: "dark",
@@ -143,6 +146,10 @@ export const useUIStore = create<UIState>()(
       // ============================================================================
       // WebSocket 连接状态
       // ============================================================================
+
+      setWsStatus: (status: "connected" | "disconnected" | "connecting" | "reconnecting") => {
+        set({ wsStatus: status });
+      },
 
       setWsConnected: (connected: boolean) => {
         set({ wsConnected: connected });
@@ -229,10 +236,11 @@ export const useUIStore = create<UIState>()(
       },
 
       toggleDialog: (dialogKey: string) => {
+        const dialogs = get().dialogs;
         set({
           dialogs: {
-            ...get().dialogs,
-            [dialogKey]: !get().dialogs[dialogKey],
+            ...dialogs,
+            [dialogKey]: !dialogs[dialogKey],
           },
         });
       },
@@ -312,4 +320,4 @@ export const selectTableSettings = (tableKey: string) => (state: UIState) =>
   state.tableSettings[tableKey] || { pageSize: 20, currentPage: 1 };
 
 export const selectFilters = (category: string) => (state: UIState) =>
-  state.filters[category] || {};
+  (state.filters as Record<string, any>)[category] || {};

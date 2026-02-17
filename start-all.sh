@@ -4,8 +4,8 @@ echo "🚀 启动 Hummingbot Trading Web UI (事件驱动版本)"
 echo "========================================"
 echo ""
 echo "📍 端口配置："
-echo "  后端：5000"
-echo "  前端：8000"
+echo "  前端：5000（预览服务）"
+echo "  后端：8000"
 echo ""
 
 # 检查端口占用
@@ -17,9 +17,9 @@ check_port() {
     return 0
 }
 
-# 检查并启动后端（端口 5000）
-if check_port 5000; then
-    echo "📦 启动后端服务 (FastAPI) - 端口 5000..."
+# 检查并启动后端（端口 8000）
+if check_port 8000; then
+    echo "📦 启动后端服务 (FastAPI) - 端口 8000..."
     cd backend
 
     # 检查是否安装了依赖
@@ -42,15 +42,15 @@ if check_port 5000; then
     python api.py > ../logs/backend.log 2>&1 &
     BACKEND_PID=$!
     echo "✅ 后端服务已启动 (PID: $BACKEND_PID)"
-    echo "📚 API 文档: http://localhost:5000/docs"
+    echo "📚 API 文档: http://localhost:8000/docs"
     cd ..
 else
     echo "⚠️  后端服务已在运行"
 fi
 
-# 检查并启动前端（端口 8000）
-if check_port 8000; then
-    echo "🎨 启动前端服务 (Next.js) - 端口 8000..."
+# 检查并启动前端（端口 5000）
+if check_port 5000; then
+    echo "🎨 启动前端服务 (Next.js) - 端口 5000..."
     
     # 检查是否安装了依赖
     if [ ! -d "node_modules" ]; then
@@ -59,7 +59,7 @@ if check_port 8000; then
     fi
 
     # 启动前端
-    pnpm dev --port 8000 > logs/frontend.log 2>&1 &
+    pnpm dev --port 5000 > logs/frontend.log 2>&1 &
     FRONTEND_PID=$!
     echo "✅ 前端服务已启动 (PID: $FRONTEND_PID)"
     echo "🌐 前端地址: http://localhost:8000"
@@ -71,10 +71,10 @@ echo ""
 echo "========================================"
 echo "🎉 服务启动完成！"
 echo "========================================"
-echo "📱 前端界面: http://localhost:8000"
-echo "📚 API 文档: http://localhost:5000/docs"
-echo "🔌 WebSocket: ws://localhost:5000/api/stream"
-echo "🔍 健康检查: http://localhost:5000/api/health"
+echo "📱 前端界面: http://localhost:5000"
+echo "📚 API 文档: http://localhost:8000/docs"
+echo "🔌 WebSocket: ws://localhost:8000/api/stream"
+echo "🔍 健康检查: http://localhost:8000/api/health"
 echo ""
 echo "📝 查看日志:"
 echo "  后端: tail -f logs/backend.log"

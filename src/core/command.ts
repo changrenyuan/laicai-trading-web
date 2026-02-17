@@ -223,6 +223,16 @@ export const updateStrategyConfig = async (
 // ============================================================================
 
 /**
+ * 启动/停止引擎
+ * @param action "start" | "stop"
+ */
+export const sendCommand = async (action: "start" | "stop") => {
+  return engineWS.send({
+    cmd: action === "start" ? "start_engine" : "stop_engine",
+  });
+};
+
+/**
  * 获取系统状态
  */
 export const getSystemStatus = async () => {

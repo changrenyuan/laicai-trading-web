@@ -4,6 +4,21 @@
  */
 
 // ============================================================================
+// 连接状态事件
+// ============================================================================
+
+export interface ConnectedEvent {
+  type: "connected";
+  timestamp?: number;
+}
+
+export interface DisconnectedEvent {
+  type: "disconnected";
+  reason?: string;
+  timestamp?: number;
+}
+
+// ============================================================================
 // 价格事件
 // ============================================================================
 
@@ -139,6 +154,8 @@ export interface TradeEvent {
 // ============================================================================
 
 export type EngineEvent =
+  | ConnectedEvent
+  | DisconnectedEvent
   | PriceEvent
   | OrderUpdateEvent
   | PositionEvent
