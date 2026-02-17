@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Plus, Edit, Trash2, CheckCircle, XCircle, Key, Link2, Activity } from 'lucide-react';
+import { Plus, Edit, Trash2, CheckCircle, XCircle, Key, Link2, Activity, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,49 +24,91 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-const connections = [
-  {
-    id: 1,
-    exchange: 'Binance',
-    status: 'connected',
-    apiKey: '••••••••••••••kL3x',
-    testnet: false,
-    lastSync: '2 min ago',
-    strategies: 2,
-  },
-  {
-    id: 2,
-    exchange: 'Coinbase',
-    status: 'connected',
-    apiKey: '••••••••••••••pM7n',
-    testnet: false,
-    lastSync: '5 min ago',
-    strategies: 1,
-  },
-  {
-    id: 3,
-    exchange: 'Kraken',
-    status: 'disconnected',
-    apiKey: '••••••••••••••qR9v',
-    testnet: true,
-    lastSync: 'N/A',
-    strategies: 0,
-  },
-  {
-    id: 4,
-    exchange: 'Gate.io',
-    status: 'connected',
-    apiKey: '••••••••••••••sT2w',
-    testnet: false,
-    lastSync: '1 min ago',
-    strategies: 0,
-  },
-];
+import { useEngineStore, useUIStore } from '@/store';
+import { createConnection, deleteConnection, testConnection } from '@/core/command';
 
 export default function ConnectionsPage() {
+  const engine = useEngineStore();
+  const ui = useUIStore();
   const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);
+  const [testnet, setTestnet] = React.useState(false);
+  const [exchange, setExchange] = React.useState('');
+  const [apiKey, setApiKey] = React.useState('');
+  const [apiSecret, setApiSecret] = React.useState('');
+  const [testingId, setTestingId] = React.useState<string | null>(null);
+
+  // 获取连接列表
+  const connectionsList = Object.values(engine.connections);
+
+  // 统计数据
+  const stats = {
+    total: connectionsList.length,
+    connected: connectionsList.filter((c) => c.status === 'connected').length,
+    disconnected: connectionsList.filter((c) => c.status === 'disconnected').length,
+    activeStrategies: Object.values(engine.strategies).filter((s) => s.status === 'running').length,
+  };
+
+  // 添加连接
+  const handleAddConnection = async () => {
+    if (!exchange || !apiKey || !apiSecret) {
+      ui.addToast('Please fill in all fields', 'error');
+      return;
+    }
+
+    try {
+      await createConnection(exchange, apiKey, apiSecret, testnet);
+      setIsAddDialogOpen(false);
+      setExchange('');
+      setApiKey('');
+      setApiSecret('');
+      setTestnet(false);
+      ui.addToast('Connection added successfully', 'success');
+    } catch (error) {
+      ui.addToast('Failed to add connection', 'error');
+    }
+  };
+
+  // 测试连接
+  const handleTestConnection = async (connectionId: string) => {
+    setTestingId(connectionId);
+    try {
+      await testConnection(connectionId);
+      ui.addToast('Connection test successful', 'success');
+    } catch (error) {
+      ui.addToast('Connection test failed', 'error');
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  // 删除连接
+  const handleDeleteConnection = async (connectionId: string) => {
+    if (!confirm('Are you sure you want to delete this connection?')) {
+      return;
+    }
+
+    try {
+      await deleteConnection(connectionId);
+      ui.addToast('Connection deleted successfully', 'success');
+    } catch (error) {
+      ui.addToast('Failed to delete connection', 'error');
+    }
+  };
+
+  // 格式化 API Key
+  const maskApiKey = (key: string) => {
+    if (!key || key.length <= 8) return key;
+    return '••••' + key.slice(-4);
+  };
+
+  // 格式化时间
+  const formatLastSync = (timestamp?: number) => {
+    if (!timestamp) return 'N/A';
+    const diff = Math.floor((Date.now() - timestamp * 1000) / 1000);
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    return `${Math.floor(diff / 3600)}h ago`;
+  };
 
   return (
     <div className="flex h-screen">
@@ -101,6 +143,18 @@ export default function ConnectionsPage() {
             </a>
           ))}
         </nav>
+        <div className="absolute bottom-4 left-4 right-4">
+          <div className="flex items-center gap-2 rounded-lg border bg-card p-3">
+            <div
+              className={`h-2 w-2 rounded-full ${
+                ui.wsStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'
+              }`}
+            />
+            <span className="text-xs text-muted-foreground">
+              {ui.wsStatus === 'connected' ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
+        </div>
       </aside>
 
       {/* Main Content */}
@@ -129,7 +183,7 @@ export default function ConnectionsPage() {
                 <div className="grid gap-4 py-4">
                   <div className="grid gap-2">
                     <Label htmlFor="exchange">Exchange</Label>
-                    <Select>
+                    <Select value={exchange} onValueChange={setExchange}>
                       <SelectTrigger id="exchange">
                         <SelectValue placeholder="Select exchange" />
                       </SelectTrigger>
@@ -145,14 +199,26 @@ export default function ConnectionsPage() {
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="api-key">API Key</Label>
-                    <Input id="api-key" type="password" placeholder="Enter API key" />
+                    <Input
+                      id="api-key"
+                      type="password"
+                      placeholder="Enter API key"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                    />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="api-secret">API Secret</Label>
-                    <Input id="api-secret" type="password" placeholder="Enter API secret" />
+                    <Input
+                      id="api-secret"
+                      type="password"
+                      placeholder="Enter API secret"
+                      value={apiSecret}
+                      onChange={(e) => setApiSecret(e.target.value)}
+                    />
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Switch id="testnet" />
+                    <Switch id="testnet" checked={testnet} onCheckedChange={setTestnet} />
                     <Label htmlFor="testnet">Use Testnet</Label>
                   </div>
                 </div>
@@ -160,7 +226,7 @@ export default function ConnectionsPage() {
                   <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={() => setIsAddDialogOpen(false)}>Connect</Button>
+                  <Button onClick={handleAddConnection}>Connect</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -174,7 +240,7 @@ export default function ConnectionsPage() {
                 <Link2 className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">4</div>
+                <div className="text-2xl font-bold">{stats.total}</div>
               </CardContent>
             </Card>
             <Card>
@@ -183,7 +249,7 @@ export default function ConnectionsPage() {
                 <CheckCircle className="h-4 w-4 text-green-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-500">3</div>
+                <div className="text-2xl font-bold text-green-500">{stats.connected}</div>
               </CardContent>
             </Card>
             <Card>
@@ -192,7 +258,7 @@ export default function ConnectionsPage() {
                 <XCircle className="h-4 w-4 text-red-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-red-500">1</div>
+                <div className="text-2xl font-bold text-red-500">{stats.disconnected}</div>
               </CardContent>
             </Card>
             <Card>
@@ -201,7 +267,7 @@ export default function ConnectionsPage() {
                 <Activity className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">3</div>
+                <div className="text-2xl font-bold">{stats.activeStrategies}</div>
               </CardContent>
             </Card>
           </div>
@@ -213,67 +279,80 @@ export default function ConnectionsPage() {
               <CardDescription>Manage your exchange API connections</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {connections.map((connection) => (
-                  <div
-                    key={connection.id}
-                    className="flex items-center justify-between rounded-lg border p-4"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div
-                        className={`flex h-12 w-12 items-center justify-center rounded-lg ${
-                          connection.status === 'connected' ? 'bg-green-500/10' : 'bg-red-500/10'
-                        }`}
-                      >
-                        {connection.status === 'connected' ? (
-                          <CheckCircle className="h-6 w-6 text-green-500" />
-                        ) : (
-                          <XCircle className="h-6 w-6 text-red-500" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold">{connection.exchange}</h3>
-                          {connection.testnet && (
-                            <Badge variant="secondary" className="text-xs">
-                              Testnet
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                          <div className="flex items-center gap-1">
-                            <Key className="h-3 w-3" />
-                            <span>{connection.apiKey}</span>
-                          </div>
-                          {connection.status === 'connected' && (
-                            <span>Synced {connection.lastSync}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="text-sm font-medium">{connection.strategies} Strategies</p>
-                        <p
-                          className={`text-sm ${
-                            connection.status === 'connected' ? 'text-green-500' : 'text-red-500'
+              {connectionsList.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Link2 className="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
+                  <p>No connections yet</p>
+                  <p className="text-sm">Add a connection to get started</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {connectionsList.map((connection) => (
+                    <div
+                      key={connection.exchange}
+                      className="flex items-center justify-between rounded-lg border p-4"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div
+                          className={`flex h-12 w-12 items-center justify-center rounded-lg ${
+                            connection.status === 'connected'
+                              ? 'bg-green-500/10'
+                              : 'bg-red-500/10'
                           }`}
                         >
-                          {connection.status}
-                        </p>
+                          {connection.status === 'connected' ? (
+                            <CheckCircle className="h-6 w-6 text-green-500" />
+                          ) : connection.status === 'connecting' ? (
+                            <RefreshCw className="h-6 w-6 text-yellow-500 animate-spin" />
+                          ) : (
+                            <XCircle className="h-6 w-6 text-red-500" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-semibold">{connection.exchange}</h3>
+                            <Badge
+                              variant={connection.status === 'connected' ? 'default' : 'secondary'}
+                              className="text-xs"
+                            >
+                              {connection.status}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            {connection.message && <span>{connection.message}</span>}
+                            {connection.status === 'connected' && connection.timestamp && (
+                              <span>Synced {formatLastSync(connection.timestamp)}</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="icon">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button variant="outline" size="icon">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                      <div className="flex items-center gap-4">
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleTestConnection(connection.exchange)}
+                            disabled={testingId === connection.exchange}
+                          >
+                            {testingId === connection.exchange ? (
+                              <RefreshCw className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleDeleteConnection(connection.exchange)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
