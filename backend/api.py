@@ -1,376 +1,407 @@
 """
-Hummingbot Trading Bot Backend API
-使用 FastAPI 构建 RESTful API
+Hummingbot Trading Bot Backend API - 事件驱动版本
+支持 WebSocket 实时推送和命令处理
+端口：5000
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
+import json
+import asyncio
 import uvicorn
+from enum import Enum
+
+# ============================================================================
+# 应用初始化
+# ============================================================================
 
 app = FastAPI(
-    title="Hummingbot Trading API",
-    description="加密货币交易机器人后端 API",
-    version="1.0.0"
+    title="Hummingbot Trading API - Event Driven",
+    description="加密货币交易机器人后端 API - 事件驱动架构",
+    version="2.0.0"
 )
 
 # 配置 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5000"],  # Next.js 开发服务器
+    allow_origins=["http://localhost:8000", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ========== 数据模型 ==========
+# ============================================================================
+# WebSocket 连接管理器
+# ============================================================================
 
-class Strategy(BaseModel):
-    id: int
-    name: str
-    type: str
-    exchange: str
-    pair: str
-    status: str
-    profit: str
-    trades: int
-    created: str
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
 
-class Order(BaseModel):
-    id: str
-    type: str
-    pair: str
-    price: str
-    amount: str
-    total: str
-    strategy: str
-    status: str
-    time: str
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"[WS] Client connected. Total connections: {len(self.active_connections)}")
 
-class Connection(BaseModel):
-    id: int
-    exchange: str
-    status: str
-    apiKey: str
-    testnet: bool
-    lastSync: str
-    strategies: int
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            print(f"[WS] Client disconnected. Total connections: {len(self.active_connections)}")
 
-class LogEntry(BaseModel):
-    timestamp: str
-    level: str
-    source: str
-    message: str
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            print(f"[WS] Error sending message: {e}")
+            self.disconnect(websocket)
 
-# ========== Mock 数据存储 ==========
+    async def broadcast(self, message: dict):
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"[WS] Error broadcasting: {e}")
+                disconnected.append(connection)
 
-strategies_db = [
-    {
-        "id": 1,
+        # 移除断开的连接
+        for connection in disconnected:
+            self.disconnect(connection)
+
+    def get_connection_count(self) -> int:
+        return len(self.active_connections)
+
+manager = ConnectionManager()
+
+# ============================================================================
+# 数据存储
+# ============================================================================
+
+class StrategyStatus(str, Enum):
+    RUNNING = "running"
+    STOPPED = "stopped"
+    PAUSED = "paused"
+    ERROR = "error"
+
+class OrderStatus(str, Enum):
+    PENDING = "pending"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+# Mock 数据存储
+strategies_db: Dict[str, dict] = {
+    "1": {
+        "id": "1",
         "name": "PMM Strategy",
         "type": "Pure Market Making",
         "exchange": "Binance",
         "pair": "BTC/USDT",
-        "status": "running",
-        "profit": "+$523.00",
+        "status": StrategyStatus.RUNNING,
+        "profit": 523.00,
         "trades": 324,
         "created": "2024-01-15"
     },
-    {
-        "id": 2,
+    "2": {
+        "id": "2",
         "name": "Arbitrage Bot",
         "type": "Arbitrage",
         "exchange": "Binance & Coinbase",
         "pair": "ETH/BTC",
-        "status": "running",
-        "profit": "+$892.00",
+        "status": StrategyStatus.RUNNING,
+        "profit": 892.00,
         "trades": 156,
         "created": "2024-01-10"
     },
-    {
-        "id": 3,
+    "3": {
+        "id": "3",
         "name": "Market Maker SOL",
         "type": "Pure Market Making",
         "exchange": "Binance",
         "pair": "SOL/USDT",
-        "status": "paused",
-        "profit": "+$238.00",
+        "status": StrategyStatus.PAUSED,
+        "profit": 238.00,
         "trades": 89,
         "created": "2024-01-08"
-    },
-]
-
-orders_db = [
-    {
-        "id": "ORD-001",
-        "type": "buy",
-        "pair": "BTC/USDT",
-        "price": "52,345.00",
-        "amount": "0.15",
-        "total": "7,851.75",
-        "strategy": "PMM Strategy",
-        "status": "filled",
-        "time": "2024-01-20 14:32:15"
-    },
-    {
-        "id": "ORD-002",
-        "type": "sell",
-        "pair": "ETH/USDT",
-        "price": "2,856.00",
-        "amount": "3.2",
-        "total": "9,139.20",
-        "strategy": "Arbitrage Bot",
-        "status": "filled",
-        "time": "2024-01-20 14:28:42"
-    },
-]
-
-connections_db = [
-    {
-        "id": 1,
-        "exchange": "Binance",
-        "status": "connected",
-        "apiKey": "••••••••••••••kL3x",
-        "testnet": False,
-        "lastSync": "2 min ago",
-        "strategies": 2
-    },
-    {
-        "id": 2,
-        "exchange": "Coinbase",
-        "status": "connected",
-        "apiKey": "••••••••••••••pM7n",
-        "testnet": False,
-        "lastSync": "5 min ago",
-        "strategies": 1
-    },
-]
-
-logs_db = [
-    {
-        "timestamp": "2024-01-20 14:32:15",
-        "level": "INFO",
-        "source": "PMM Strategy",
-        "message": "Placing buy order on Binance BTC/USDT at 52,345.00"
-    },
-    {
-        "timestamp": "2024-01-20 14:32:16",
-        "level": "INFO",
-        "source": "PMM Strategy",
-        "message": "Order ORD-001 successfully placed"
-    },
-]
-
-# ========== 仪表盘 API ==========
-
-@app.get("/api/dashboard")
-async def get_dashboard():
-    """获取仪表盘数据"""
-    return {
-        "totalProfit": 12453.00,
-        "totalTrades": 1284,
-        "successRate": 94.2,
-        "activeStrategies": 3,
-        "uptime": "24h 15m",
-        "strategies": [
-            {
-                "name": "PMM Strategy",
-                "pair": "BTC/USDT",
-                "profit": "+$523.00",
-                "status": "running"
-            },
-            {
-                "name": "Arbitrage",
-                "pair": "ETH/BTC",
-                "profit": "+$892.00",
-                "status": "running"
-            },
-            {
-                "name": "Market Making",
-                "pair": "SOL/USDT",
-                "profit": "+$238.00",
-                "status": "running"
-            }
-        ],
-        "recentTrades": [
-            {
-                "type": "buy",
-                "pair": "BTC/USDT",
-                "price": "52,345.00",
-                "amount": "0.15",
-                "time": "2m ago"
-            },
-            {
-                "type": "sell",
-                "pair": "ETH/USDT",
-                "price": "2,856.00",
-                "amount": "3.2",
-                "time": "5m ago"
-            },
-            {
-                "type": "buy",
-                "pair": "SOL/USDT",
-                "price": "98.50",
-                "amount": "50",
-                "time": "8m ago"
-            }
-        ]
     }
+}
 
-# ========== 策略 API ==========
-
-@app.get("/api/strategies", response_model=List[Strategy])
-async def get_strategies():
-    """获取所有策略"""
-    return strategies_db
-
-@app.get("/api/strategies/{strategy_id}", response_model=Strategy)
-async def get_strategy(strategy_id: int):
-    """获取指定策略"""
-    strategy = next((s for s in strategies_db if s["id"] == strategy_id), None)
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-    return strategy
-
-@app.post("/api/strategies")
-async def create_strategy(strategy: dict):
-    """创建新策略"""
-    new_id = max(s["id"] for s in strategies_db) + 1
-    new_strategy = {
-        "id": new_id,
-        **strategy,
-        "status": "stopped",
-        "profit": "+$0.00",
-        "trades": 0,
-        "created": datetime.now().strftime("%Y-%m-%d")
+orders_db: Dict[str, dict] = {
+    "ORD-001": {
+        "orderId": "ORD-001",
+        "status": OrderStatus.FILLED,
+        "filled": 0.15,
+        "remaining": 0.0,
+        "price": 52345.0,
+        "symbol": "BTC/USDT",
+        "side": "buy",
+        "strategy": "1",
+        "createTime": "2024-01-20 14:32:15",
+        "updateTime": "2024-01-20 14:32:16"
     }
-    strategies_db.append(new_strategy)
-    return new_strategy
+}
 
-@app.post("/api/strategies/{strategy_id}/start")
-async def start_strategy(strategy_id: int):
-    """启动策略"""
-    strategy = next((s for s in strategies_db if s["id"] == strategy_id), None)
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-    strategy["status"] = "running"
-    return {"status": "success", "message": "Strategy started", "strategy": strategy}
+prices_db: Dict[str, float] = {
+    "BTC/USDT": 52345.0,
+    "ETH/USDT": 2856.0,
+    "SOL/USDT": 98.5,
+    "ETH/BTC": 0.0545
+}
 
-@app.post("/api/strategies/{strategy_id}/stop")
-async def stop_strategy(strategy_id: int):
-    """停止策略"""
-    strategy = next((s for s in strategies_db if s["id"] == strategy_id), None)
-    if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-    strategy["status"] = "stopped"
-    return {"status": "success", "message": "Strategy stopped", "strategy": strategy}
+# ============================================================================
+# 命令模型
+# ============================================================================
 
-@app.delete("/api/strategies/{strategy_id}")
-async def delete_strategy(strategy_id: int):
-    """删除策略"""
-    global strategies_db
-    strategies_db = [s for s in strategies_db if s["id"] != strategy_id]
-    return {"status": "success", "message": "Strategy deleted"}
+class CommandRequest(BaseModel):
+    cmd: str
+    id: Optional[str] = None
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    type: Optional[str] = None
+    size: Optional[float] = None
+    price: Optional[float] = None
+    config: Optional[Dict[str, Any]] = None
+    exchange: Optional[str] = None
+    api_key: Optional[str] = None
+    api_secret: Optional[str] = None
+    testnet: Optional[bool] = False
+    order_id: Optional[str] = None
 
-# ========== 订单 API ==========
+# ============================================================================
+# 辅助函数
+# ============================================================================
 
-@app.get("/api/orders", response_model=List[Order])
-async def get_orders(
-    status: Optional[str] = None,
-    strategy: Optional[str] = None,
-    order_type: Optional[str] = None
-):
-    """获取订单列表，支持筛选"""
-    filtered_orders = orders_db
-
-    if status:
-        filtered_orders = [o for o in filtered_orders if o["status"] == status]
-    if strategy:
-        filtered_orders = [o for o in filtered_orders if o["strategy"] == strategy]
-    if order_type:
-        filtered_orders = [o for o in filtered_orders if o["type"] == order_type]
-
-    return filtered_orders
-
-@app.get("/api/orders/{order_id}", response_model=Order)
-async def get_order(order_id: str):
-    """获取指定订单"""
-    order = next((o for o in orders_db if o["id"] == order_id), None)
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    return order
-
-# ========== 连接 API ==========
-
-@app.get("/api/connections", response_model=List[Connection])
-async def get_connections():
-    """获取所有连接"""
-    return connections_db
-
-@app.post("/api/connections")
-async def create_connection(connection: dict):
-    """创建新连接"""
-    new_id = max(c["id"] for c in connections_db) + 1
-    new_connection = {
-        "id": new_id,
-        **connection,
-        "status": "connected",
-        "lastSync": "Just now",
-        "strategies": 0
+async def emit_event(event_type: str, data: dict):
+    """发送事件到所有连接的 WebSocket 客户端"""
+    event = {
+        "type": event_type,
+        **data,
+        "timestamp": int(datetime.now().timestamp())
     }
-    connections_db.append(new_connection)
-    return new_connection
+    await manager.broadcast(event)
+    print(f"[Event] Emitted: {event_type}")
 
-@app.delete("/api/connections/{connection_id}")
-async def delete_connection(connection_id: int):
-    """删除连接"""
-    global connections_db
-    connections_db = [c for c in connections_db if c["id"] != connection_id]
-    return {"status": "success", "message": "Connection deleted"}
-
-# ========== 日志 API ==========
-
-@app.get("/api/logs", response_model=List[LogEntry])
-async def get_logs(
-    level: Optional[str] = None,
-    source: Optional[str] = None,
-    limit: int = 100
-):
-    """获取日志列表，支持筛选"""
-    filtered_logs = logs_db
-
-    if level:
-        filtered_logs = [l for l in filtered_logs if l["level"].lower() == level.lower()]
-    if source:
-        filtered_logs = [l for l in filtered_logs if l["source"] == source]
-
-    return filtered_logs[-limit:]
+# ============================================================================
+# REST API 端点（兼容旧版本）
+# ============================================================================
 
 @app.get("/api/health")
 async def health_check():
-    """健康检查"""
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
+        "version": "2.0.0",
+        "ws_connections": manager.get_connection_count()
     }
-
-# ========== 根路径 ==========
 
 @app.get("/")
 async def root():
-    """API 根路径"""
     return {
-        "message": "Hummingbot Trading API",
-        "version": "1.0.0",
+        "message": "Hummingbot Trading API - Event Driven",
+        "version": "2.0.0",
         "docs": "/docs",
-        "health": "/api/health"
+        "ws": "ws://localhost:5000/api/stream",
+        "command": "http://localhost:5000/api/command",
+        "health": "/api/health",
+        "port": 5000
     }
 
+# ============================================================================
+# WebSocket 端点
+# ============================================================================
+
+@app.websocket("/api/stream")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket 实时推送端点"""
+    await manager.connect(websocket)
+
+    try:
+        # 发送初始状态快照
+        initial_snapshot = {
+            "type": "snapshot",
+            "strategies": list(strategies_db.values()),
+            "orders": list(orders_db.values()),
+            "prices": prices_db,
+            "systemStatus": {
+                "uptime": 86415,  # 24h 15m
+                "bot_status": "running",
+                "active_strategies": 2,
+                "total_profit": 1653.0,
+                "total_trades": 569,
+                "success_rate": 94.2,
+                "timestamp": int(datetime.now().timestamp())
+            }
+        }
+        await manager.send_personal_message(initial_snapshot, websocket)
+
+        # 启动模拟数据生成任务
+        task = asyncio.create_task(simulate_market_data(websocket))
+
+        # 保持连接
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+
+            # 处理心跳
+            if message.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+
+    except WebSocketDisconnect:
+        print("[WS] Client disconnected")
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"[WS] Error: {e}")
+        manager.disconnect(websocket)
+    finally:
+        if 'task' in locals():
+            task.cancel()
+
+async def simulate_market_data(websocket: WebSocket):
+    """模拟市场数据推送"""
+    symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+    sources = ["PMM Strategy", "Arbitrage Bot", "System"]
+
+    try:
+        while True:
+            await asyncio.sleep(2)
+
+            # 模拟价格更新
+            for symbol in symbols:
+                base_price = prices_db.get(symbol, 1000)
+                new_price = base_price * (1 + (hash(datetime.now()) % 200 - 100) / 10000)
+                prices_db[symbol] = new_price
+
+                await emit_event("price", {
+                    "symbol": symbol,
+                    "price": new_price
+                })
+
+            # 模拟日志
+            log_level = ["info", "info", "info", "warn", "error"][hash(datetime.now()) % 5]
+            log_source = sources[hash(datetime.now()) % len(sources)]
+            log_messages = {
+                "info": ["Processing market data update", "Checking order book depth"],
+                "warn": ["Inventory imbalance detected", "Price deviation above threshold"],
+                "error": ["Connection timeout", "Order placement failed"]
+            }
+
+            await emit_event("log", {
+                "level": log_level,
+                "source": log_source,
+                "msg": log_messages[log_level][hash(datetime.now()) % 2],
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+    except asyncio.CancelledError:
+        print("[WS] Simulation task cancelled")
+
+# ============================================================================
+# 命令处理端点
+# ============================================================================
+
+@app.post("/api/command")
+async def handle_command(command: CommandRequest):
+    """统一命令处理接口"""
+    print(f"[Command] Received: {command.cmd}")
+
+    try:
+        # 策略管理命令
+        if command.cmd == "start_strategy":
+            if command.id and command.id in strategies_db:
+                strategies_db[command.id]["status"] = StrategyStatus.RUNNING
+                await emit_event("strategy", strategies_db[command.id])
+                return {"status": "success", "message": f"Strategy {command.id} started"}
+            else:
+                raise HTTPException(status_code=404, detail="Strategy not found")
+
+        elif command.cmd == "stop_strategy":
+            if command.id and command.id in strategies_db:
+                strategies_db[command.id]["status"] = StrategyStatus.STOPPED
+                await emit_event("strategy", strategies_db[command.id])
+                return {"status": "success", "message": f"Strategy {command.id} stopped"}
+            else:
+                raise HTTPException(status_code=404, detail="Strategy not found")
+
+        elif command.cmd == "pause_strategy":
+            if command.id and command.id in strategies_db:
+                strategies_db[command.id]["status"] = StrategyStatus.PAUSED
+                await emit_event("strategy", strategies_db[command.id])
+                return {"status": "success", "message": f"Strategy {command.id} paused"}
+            else:
+                raise HTTPException(status_code=404, detail="Strategy not found")
+
+        # 订单管理命令
+        elif command.cmd == "place_order":
+            order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            new_order = {
+                "orderId": order_id,
+                "status": OrderStatus.PENDING,
+                "filled": 0.0,
+                "remaining": command.size if command.size else 1.0,
+                "price": command.price if command.price else prices_db.get(command.symbol or "BTC/USDT", 50000),
+                "symbol": command.symbol or "BTC/USDT",
+                "side": command.side or "buy",
+                "strategy": None,
+                "createTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            orders_db[order_id] = new_order
+            await emit_event("order_update", new_order)
+            return {"status": "success", "order_id": order_id}
+
+        elif command.cmd == "cancel_order":
+            if command.order_id and command.order_id in orders_db:
+                orders_db[command.order_id]["status"] = OrderStatus.CANCELLED
+                await emit_event("order_update", orders_db[command.order_id])
+                return {"status": "success", "message": f"Order {command.order_id} cancelled"}
+            else:
+                raise HTTPException(status_code=404, detail="Order not found")
+
+        # 查询命令
+        elif command.cmd == "get_system_status":
+            return {
+                "type": "system_status",
+                "uptime": 86415,
+                "bot_status": "running",
+                "active_strategies": sum(1 for s in strategies_db.values() if s["status"] == StrategyStatus.RUNNING),
+                "total_profit": sum(s.get("profit", 0) for s in strategies_db.values()),
+                "total_trades": sum(s.get("trades", 0) for s in strategies_db.values()),
+                "success_rate": 94.2,
+                "timestamp": int(datetime.now().timestamp())
+            }
+
+        elif command.cmd == "get_strategies":
+            return {"type": "strategies", "data": list(strategies_db.values())}
+
+        elif command.cmd == "get_orders":
+            return {"type": "orders", "data": list(orders_db.values())}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown command: {command.cmd}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Command] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Command failed: {str(e)}")
+
+# ============================================================================
+# 启动服务器
+# ============================================================================
+
 if __name__ == "__main__":
-    print("🚀 Starting Hummingbot Trading API...")
-    print("📚 API Documentation: http://localhost:8000/docs")
-    print("🔍 API Health Check: http://localhost:8000/api/health")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("🚀 Starting Hummingbot Trading API (Event Driven)...")
+    print("📚 API Documentation: http://localhost:5000/docs")
+    print("🔌 WebSocket Endpoint: ws://localhost:5000/api/stream")
+    print("📝 Command Endpoint: http://localhost:5000/api/command")
+    print("🔍 Health Check: http://localhost:5000/api/health")
+    print("")
+    print("🔄 Event-driven architecture enabled!")
+    print("📡 Real-time WebSocket streaming active!")
+    print("📍 Port: 5000 (Backend)")
+    print("")
+
+    uvicorn.run(app, host="0.0.0.0", port=5000)
