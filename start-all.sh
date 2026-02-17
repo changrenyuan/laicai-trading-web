@@ -59,7 +59,7 @@ if check_port 8000; then
     fi
 
     # 启动前端
-    pnpm dev --port 8000 --host > logs/frontend.log 2>&1 &
+    pnpm dev --port 8000 > logs/frontend.log 2>&1 &
     FRONTEND_PID=$!
     echo "✅ 前端服务已启动 (PID: $FRONTEND_PID)"
     echo "🌐 前端地址: http://localhost:8000"
