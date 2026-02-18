@@ -18,9 +18,6 @@ const WS_CONFIG = {
   reconnectInterval: 2000,    // 重连间隔（毫秒）
   maxReconnectAttempts: 10,   // 最大重连次数
   heartbeatInterval: 30000,   // 心跳间隔（毫秒）
-
-  // 命令接口地址
-  commandUrl: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/command",
 };
 
 // ============================================================================
@@ -283,31 +280,48 @@ class EngineWS {
   }
 
   // ============================================================================
-  // 命令发送（通过 HTTP POST）
+  // 命令发送（通过 WebSocket）
   // ============================================================================
 
   /**
-   * 发送命令到后端
+   * 发送命令到后端（通过 WebSocket）
    * @param command 命令对象
+   * @returns Promise 等待发送完成
    */
   async send(command: Record<string, any>): Promise<void> {
-    try {
-      const response = await fetch(WS_CONFIG.commandUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(command),
-      });
+    const message = JSON.stringify(command);
 
-      if (!response.ok) {
-        throw new Error(`Command failed: ${response.status} ${response.statusText}`);
+    // 如果已连接，直接发送
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(message);
+        console.log("[WS] Command sent via WebSocket:", command);
+      } catch (error) {
+        console.error("[WS] Failed to send command via WebSocket:", error);
+        throw new Error("WebSocket send failed");
       }
+    } else {
+      // 未连接，加入队列并等待连接
+      console.log("[WS] WebSocket not connected, queuing command:", command);
+      this.queueMessage(message);
 
-      console.log("[WS] Command sent successfully:", command);
-    } catch (error) {
-      console.error("[WS] Failed to send command:", error);
-      throw error;
+      // 等待连接建立（最多 5 秒）
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("WebSocket not connected, command queued"));
+        }, 5000);
+
+        const checkConnection = () => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            clearTimeout(timeout);
+            resolve();
+          } else {
+            setTimeout(checkConnection, 100);
+          }
+        };
+
+        checkConnection();
+      });
     }
   }
 }
