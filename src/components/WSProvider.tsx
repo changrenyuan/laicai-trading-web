@@ -5,13 +5,14 @@
  * 在应用启动时自动连接 WebSocket，管理连接状态
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { engineWS, WSConnectionState } from "@/core/ws";
 import { useUIStore } from "@/store/uiStore";
 import { useEngineStore } from "@/store/engineStore";
 
 export function WSProvider({ children }: { children: React.ReactNode }) {
-  const [isInitialized, setIsInitialized] = useState(false);
+  // 使用 ref 而不是 state 来避免 React 严格模式的双重挂载问题
+  const isInitializedRef = useRef(false);
 
   // UI 状态
   const setWsConnected = useUIStore((state) => state.setWsConnected);
@@ -22,7 +23,8 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
   const reset = useEngineStore((state) => state.reset);
 
   useEffect(() => {
-    if (isInitialized) return;
+    // 避免在严格模式下重复初始化
+    if (isInitializedRef.current) return;
 
     console.log("[WSProvider] Initializing WebSocket connection...");
 
@@ -61,8 +63,8 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
     // 连接 WebSocket
     engineWS.connect();
 
-    // 标记为已初始化
-    setIsInitialized(true);
+    // 标记为已初始化（使用 ref 避免重复初始化）
+    isInitializedRef.current = true;
 
     // 清理函数
     return () => {
@@ -71,8 +73,9 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
       unsubscribeError();
       engineWS.disconnect();
       reset(); // 重置引擎状态
+      // 注意：不要重置 isInitializedRef.current，这会导致组件卸载后重新挂载时可以重新连接
     };
-  }, [isInitialized, setWsConnected, setWsConnecting, addToast, reset]);
+  }, [setWsConnected, setWsConnecting, addToast, reset]);
 
   // 应用主题
   const theme = useUIStore((state) => state.theme);
