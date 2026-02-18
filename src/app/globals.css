@@ -1,6 +1,20 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+/* 防止主题闪烁：默认应用暗色主题，直到脚本确定实际主题 */
+html {
+  color-scheme: light;
+}
+
+/* 在脚本执行前应用暗色主题作为默认（更符合大多数用户偏好） */
+html:not(.dark) {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
