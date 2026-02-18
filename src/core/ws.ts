@@ -17,7 +17,8 @@ const WS_CONFIG = {
   // 重连配置
   reconnectInterval: 2000,    // 重连间隔（毫秒）
   maxReconnectAttempts: 10,   // 最大重连次数
-  heartbeatInterval: 30000,   // 心跳间隔（毫秒）
+  heartbeatInterval: 15000,   // 心跳间隔（毫秒）- 缩短到 15 秒
+  pongTimeout: 5000,          // 等待 pong 超时（毫秒）
 };
 
 // ============================================================================
@@ -42,6 +43,8 @@ class EngineWS {
   private reconnectAttempts: number = 0;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private messageQueue: string[] = []; // 消息队列（断线时缓存）
+  private lastPongTime: number = 0; // 最后一次收到 pong 的时间
+  private pongTimeoutTimer: NodeJS.Timeout | null = null; // pong 超时检测
 
   // 事件监听器
   private stateChangeListeners: Set<(state: WSConnectionState) => void> = new Set();
@@ -84,6 +87,12 @@ class EngineWS {
     }
 
     this.stopHeartbeat();
+
+    if (this.pongTimeoutTimer) {
+      clearTimeout(this.pongTimeoutTimer);
+      this.pongTimeoutTimer = null;
+    }
+
     this.setConnectionState(WSConnectionState.DISCONNECTED);
     this.reconnectAttempts = 0;
   }
@@ -127,6 +136,11 @@ class EngineWS {
 
       this.stopHeartbeat();
 
+      if (this.pongTimeoutTimer) {
+        clearTimeout(this.pongTimeoutTimer);
+        this.pongTimeoutTimer = null;
+      }
+
       // 非正常关闭，尝试重连
       if (event.code !== 1000) {
         this.setConnectionState(WSConnectionState.RECONNECTING);
@@ -141,6 +155,24 @@ class EngineWS {
    * 处理收到的消息
    */
   private handleMessage(event: EngineEvent): void {
+    // 处理心跳响应（使用类型断言，因为 ping/pong 不属于业务事件）
+    const data = event as any;
+
+    // 处理心跳响应
+    if (data.type === "pong") {
+      console.log("[WS] Received pong");
+      this.lastPongTime = Date.now();
+      this.resetPongTimeout();
+      return;
+    }
+
+    // 处理 ping 请求（可选，如果后端发送 ping）
+    if (data.type === "ping") {
+      console.log("[WS] Received ping, sending pong");
+      this.ws?.send(JSON.stringify({ type: "pong" }));
+      return;
+    }
+
     // 传递给全局状态管理器
     try {
       useEngineStore.getState().onEvent(event);
@@ -227,6 +259,9 @@ class EngineWS {
    */
   private startHeartbeat(): void {
     this.stopHeartbeat();
+    this.lastPongTime = Date.now();
+
+    console.log("[WS] Starting heartbeat interval (every 15000ms)");
 
     this.heartbeatTimer = setInterval(() => {
       this.sendHeartbeat();
@@ -241,6 +276,30 @@ class EngineWS {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+    this.resetPongTimeout();
+  }
+
+  /**
+   * 重置 pong 超时检测
+   */
+  private resetPongTimeout(): void {
+    if (this.pongTimeoutTimer) {
+      clearTimeout(this.pongTimeoutTimer);
+      this.pongTimeoutTimer = null;
+    }
+
+    // 设置新的超时检测
+    this.pongTimeoutTimer = setTimeout(() => {
+      const now = Date.now();
+      const elapsed = now - this.lastPongTime;
+
+      console.warn(`[WS] No pong received for ${elapsed}ms, connection may be dead`);
+
+      // 关闭连接以触发重连
+      if (this.ws) {
+        this.ws.close(1000, "No pong received");
+      }
+    }, WS_CONFIG.pongTimeout + WS_CONFIG.heartbeatInterval);
   }
 
   /**
@@ -248,7 +307,16 @@ class EngineWS {
    */
   private sendHeartbeat(): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: "ping" }));
+      try {
+        this.ws.send(JSON.stringify({ type: "ping" }));
+        console.log("[WS] Sent ping");
+      } catch (error) {
+        console.error("[WS] Failed to send ping:", error);
+        // 发送失败，关闭连接
+        this.ws.close(1000, "Failed to send ping");
+      }
+    } else {
+      console.warn("[WS] Cannot send ping: WebSocket not connected");
     }
   }
 
