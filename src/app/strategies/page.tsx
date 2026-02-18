@@ -5,6 +5,7 @@ import { Plus, Play, Pause, Edit, Trash2, Settings, Activity, RefreshCw } from '
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SidebarLayout } from '@/components/SidebarLayout';
 import {
   Dialog,
   DialogContent,
@@ -161,55 +162,8 @@ export default function StrategiesPage() {
   };
 
   return (
-    <div className="flex h-screen">
-      {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 border-r bg-card">
-        <div className="flex h-16 items-center border-b px-6">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Activity className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <span className="text-lg font-semibold">Hummingbot</span>
-          </div>
-        </div>
-        <nav className="space-y-1 p-4">
-          {[
-            { title: 'Dashboard', href: '/' },
-            { title: 'Strategies', href: '/strategies', active: true },
-            { title: 'Orders', href: '/orders' },
-            { title: 'Connections', href: '/connections' },
-            { title: 'Logs', href: '/logs' },
-          ].map((item) => (
-            <a
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                item.active
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-              }`}
-            >
-              {item.title}
-            </a>
-          ))}
-        </nav>
-        <div className="absolute bottom-4 left-4 right-4">
-          <div className="flex items-center gap-2 rounded-lg border bg-card p-3">
-            <div
-              className={`h-2 w-2 rounded-full ${
-                ui.wsStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'
-              }`}
-            />
-            <span className="text-xs text-muted-foreground">
-              {ui.wsStatus === 'connected' ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto bg-background">
-        <div className="p-8">
+    <SidebarLayout>
+      <div className="p-8">
           {/* Header */}
           <div className="mb-8 flex items-center justify-between">
             <div>
@@ -484,7 +438,7 @@ export default function StrategiesPage() {
             </div>
           )}
         </div>
-      </main>
-    </div>
+      </div>
+    </SidebarLayout>
   );
 }

@@ -5,6 +5,7 @@ import { Activity, ArrowUpRight, ArrowDownRight, DollarSign, TrendingUp, Clock, 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { useEngineStore, useUIStore } from '@/store';
 import { sendCommand } from '@/core/command';
 
@@ -64,7 +65,7 @@ export default function DashboardPage() {
             </a>
           ))}
         </nav>
-        <div className="absolute bottom-4 left-4 right-4">
+        <div className="absolute bottom-4 left-4 right-4 space-y-3">
           <div className="flex items-center gap-2 rounded-lg border bg-card p-3">
             <div
               className={`h-2 w-2 rounded-full ${
@@ -74,6 +75,10 @@ export default function DashboardPage() {
             <span className="text-xs text-muted-foreground">
               {engine.isConnected ? 'Bot Running' : 'Bot Stopped'}
             </span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">
+            <span className="text-xs text-muted-foreground">主题</span>
+            <ThemeToggle />
           </div>
         </div>
       </aside>

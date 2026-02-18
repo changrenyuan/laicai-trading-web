@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Inspector } from 'react-dev-inspector';
 import { WSProvider } from '@/components/WSProvider';
-import { Head } from '@/components/Head';
+import { ThemeScript } from '@/components/ThemeScript';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -36,7 +36,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <Head />
+        <ThemeScript />
       </head>
       <body className={`antialiased bg-background text-foreground`}>
         <WSProvider>
