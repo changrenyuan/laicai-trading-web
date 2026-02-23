@@ -697,3 +697,51 @@ MIT License
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
+
+
+---
+
+## 🚀 部署到生产环境
+
+### 快速部署
+
+将项目部署到服务器：
+
+- **[快速部署指南](./QUICK_START.md)** - 3 分钟快速部署
+- **[完整部署文档](./DEPLOYMENT.md)** - 详细的阿里云部署指南
+- **[自动部署脚本](./deploy.sh)** - 一键部署到服务器
+
+### 支持的部署方式
+
+1. **PM2 + Nginx** - 推荐方式，稳定可靠
+2. **Docker** - 容器化部署，易于管理
+3. **阿里云 ECS** - 完整的云端部署指南
+
+### 快速开始
+
+```bash
+# 使用自动部署脚本
+chmod +x deploy.sh
+sudo ./deploy.sh
+```
+
+详细信息请参考 [QUICK_START.md](./QUICK_START.md) 和 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+
+---
+
+## 📞 技术支持
+
+如有问题，请：
+1. 查看 [DEPLOYMENT.md](./DEPLOYMENT.md) 常见问题部分
+2. 提交 Issue 到 GitHub 仓库
+3. 参考项目文档
+
+---
+
+## 📄 许可证
+
+MIT License
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
