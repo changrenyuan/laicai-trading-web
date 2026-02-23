@@ -745,3 +745,76 @@ MIT License
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
+
+
+---
+
+## 🚀 部署到生产环境
+
+### Nginx 部署
+
+将项目部署到服务器：
+
+- **[快速部署指南](./QUICK_START.md)** - 3 分钟快速部署
+- **[完整部署文档](./DEPLOYMENT.md)** - 详细的 Nginx 部署指南
+- **[自动部署脚本](./deploy.sh)** - 一键部署到服务器（Nginx）
+
+### Apache 部署
+
+如果你更喜欢使用 Apache，我们也提供了完整的 Apache 部署方案：
+
+- **[Apache 部署指南](./APACHE_DEPLOYMENT.md)** - 详细的 Apache 部署文档
+- **[Apache 自动部署脚本](./deploy-apache.sh)** - 一键部署到服务器（Apache）
+
+### Nginx vs Apache
+
+| 特性 | Nginx | Apache |
+|------|-------|--------|
+| **并发性能** | 更高 | 较低 |
+| **内存占用** | 较低 | 较高 |
+| **配置复杂度** | 简单 | 中等 |
+| **.htaccess 支持** | ❌ | ✅ |
+| **模块生态** | 有限 | 丰富 |
+| **适用场景** | 高并发网站 | 传统 Web 应用 |
+
+**推荐**：
+- 如果你需要高性能和低资源占用 → 选择 **Nginx**
+- 如果你需要灵活的 .htaccess 配置和丰富模块 → 选择 **Apache**
+
+### 快速开始
+
+#### 使用 Nginx 自动部署脚本
+
+```bash
+chmod +x deploy.sh
+sudo ./deploy.sh
+```
+
+#### 使用 Apache 自动部署脚本
+
+```bash
+chmod +x deploy-apache.sh
+sudo ./deploy-apache.sh
+```
+
+详细信息请参考对应的部署文档。
+
+---
+
+## 📞 技术支持
+
+如有问题，请：
+1. 查看 [DEPLOYMENT.md](./DEPLOYMENT.md) Nginx 部署常见问题
+2. 查看 [APACHE_DEPLOYMENT.md](./APACHE_DEPLOYMENT.md) Apache 部署常见问题
+3. 提交 Issue 到 GitHub 仓库
+4. 参考项目文档
+
+---
+
+## 📄 许可证
+
+MIT License
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
